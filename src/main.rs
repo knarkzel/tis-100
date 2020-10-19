@@ -1,12 +1,10 @@
 use owo_colors::OwoColorize;
 use rustyline::Editor;
-use std::path::PathBuf;
 use anyhow::{Result, anyhow};
 use crate::{Instruction::*, Port::*};
 use serde::{Serialize, Deserialize};
 use ron::{ser, de};
 use std::fs;
-
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct Node {
@@ -16,25 +14,31 @@ struct Node {
     instructions: Vec<Instruction>,
 }
 
-
 impl Node {
     fn new() -> Self {
         Self::default()
     }
-    fn parse(&mut self, line: &str) -> Result<()> {
+    fn parse(&mut self, line: &str, i: &mut usize) -> Result<()> {
         macro_rules! push {
             ($e:expr) => {
                 let instructions = &mut self.instructions;
                 instructions.push($e);
+                *i += 1;
             };
         }
         let words = line.to_lowercase().split_whitespace().map(|x| x.to_string()).collect::<Vec<_>>();
+        if line.starts_with("#") {
+            push!(Comment(line[1..].to_string()));
+            return Ok(());
+        } else if line.contains(':') {
+            let label = Label {
+                name: line.trim_end_matches(':').to_string(),
+                line: *i,
+            };
+            push!(Label(label));
+            return Ok(());
+        }
         match &*words[0] {
-            "mov" => {
-                let first = Port::parse(words[1].trim_end_matches(','))?;
-                let second = Port::parse(&words[2])?;
-                push!(Mov(first, second));
-            }
             "show" => {
                 self.show();
             }
@@ -59,6 +63,20 @@ impl Node {
                 let file = fs::File::open(title)?;
                 let node: Self = de::from_reader(file)?;
                 *self = node;
+            }
+            "nop" => (),
+            "mov" => {
+                let first = Port::parse(words[1].trim_end_matches(','))?;
+                let second = Port::parse(&words[2])?;
+                push!(Mov(first, second));
+            }
+            "swp" => {
+                let temp = self.acc;
+                self.acc = self.bak;
+                self.bak = temp;
+            }
+            "sav" => {
+                self.bak = self.acc;    
             }
             _ => return Err(anyhow!("Failed to read `{}`", line.red())),
         };
@@ -130,12 +148,12 @@ enum Instruction {
     Add(Port),
     Sub(Port),
     Mov(Port, Port),
-    Write(PathBuf),
 }
 
 fn main() {
     let mut node = Node::new();
     let mut rl = Editor::<()>::new();
+    let mut i = 0;
     loop {
         let readline = rl.readline("> ");
         match readline {
@@ -143,12 +161,8 @@ fn main() {
                 let line = line.trim();
                 if line.is_empty() {
                     continue;
-                } else if line.starts_with("#") {
-                    let comment = Comment(line[1..].to_string());
-                    node.instructions.push(comment);
-                    continue;
                 }
-                let parse = node.parse(line);
+                let parse = node.parse(line, &mut i);
                 if let Err(parse) = parse {
                     println!("{}", parse);
                 }
