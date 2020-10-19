@@ -7,6 +7,7 @@ use serde::{Serialize, Deserialize};
 use ron::{ser, de};
 use std::fs;
 
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct Node {
     acc: isize,
@@ -15,18 +16,24 @@ struct Node {
     instructions: Vec<Instruction>,
 }
 
+
 impl Node {
     fn new() -> Self {
         Self::default()
     }
     fn parse(&mut self, line: &str) -> Result<()> {
+        macro_rules! push {
+            ($e:expr) => {
+                let instructions = &mut self.instructions;
+                instructions.push($e);
+            };
+        }
         let words = line.to_lowercase().split_whitespace().map(|x| x.to_string()).collect::<Vec<_>>();
-        let inst = &mut self.instructions;
         match &*words[0] {
             "mov" => {
                 let first = Port::parse(words[1].trim_end_matches(','))?;
                 let second = Port::parse(&words[2])?;
-                inst.push(Mov(first, second));
+                push!(Mov(first, second));
             }
             "show" => {
                 self.show();
