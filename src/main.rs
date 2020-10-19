@@ -3,11 +3,15 @@ use rustyline::Editor;
 use std::path::PathBuf;
 use anyhow::{Result, anyhow};
 use crate::{Instruction::*, Port::*};
+use serde::{Serialize, Deserialize};
+use ron::{ser, de};
+use std::fs;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 struct Node {
     acc: isize,
     bak: isize,
+    pc: usize,
     instructions: Vec<Instruction>,
 }
 
@@ -17,32 +21,57 @@ impl Node {
     }
     fn parse(&mut self, line: &str) -> Result<()> {
         let words = line.to_lowercase().split_whitespace().map(|x| x.to_string()).collect::<Vec<_>>();
-        let instruction = match &*words[0] {
+        let inst = &mut self.instructions;
+        match &*words[0] {
             "mov" => {
                 let first = Port::parse(words[1].trim_end_matches(','))?;
                 let second = Port::parse(&words[2])?;
-                Mov(first, second)
+                inst.push(Mov(first, second));
+            }
+            "show" => {
+                self.show();
+            }
+            "clear" => {
+                self.instructions = vec![];
+            }
+            "save" => {
+                let title = if words.len() > 1 {
+                    format!("{}.ron", words[1])
+                } else {
+                    format!("node.ron")
+                };
+                let content = ser::to_string_pretty(self, ser::PrettyConfig::default())?;
+                fs::write(title, content)?;
+            }
+            "load" => {
+                let title = if words.len() > 1 {
+                    format!("{}.ron", words[1])
+                } else {
+                    format!("node.ron")
+                };
+                let file = fs::File::open(title)?;
+                let node: Self = de::from_reader(file)?;
+                *self = node;
             }
             _ => return Err(anyhow!("Failed to read `{}`", line.red())),
         };
-        self.instructions.push(instruction);
         Ok(())
     }
     fn show(&self) {
-        // println!("{}: {}", "ACC".green(), self.acc);
-        // println!("{}: {}", "BAK".green(), self.bak);
+        println!("{}: {}", "ACC".green(), self.acc);
+        println!("{}: {}", "BAK".green(), self.bak);
         println!("{}: {:#?}", "INSTRUCTIONS".green(), self.instructions);
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 struct Label {
     name: String,
     line: usize,
 }
 
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 enum Port {
     Acc,
     Left,
@@ -77,7 +106,7 @@ impl Port {
 }
 
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 enum Instruction {
     Nop,
     Swp,
@@ -115,7 +144,6 @@ fn main() {
                 let parse = node.parse(line);
                 if let Err(parse) = parse {
                     println!("{}", parse);
-                    node.show();
                 }
             }
             Err(_) => break,
