@@ -1,11 +1,11 @@
-use owo_colors::OwoColorize;
-use rustyline::Editor;
-use anyhow::{Result, anyhow};
 use crate::{Instruction::*, Port::*};
-use serde::{Serialize, Deserialize};
-use ron::{ser, de};
-use std::fs;
+use anyhow::{anyhow, Result};
+use owo_colors::OwoColorize;
+use ron::{de, ser};
+use rustyline::Editor;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fs;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct Program {
@@ -19,10 +19,42 @@ impl Program {
     }
     fn check_commands(&mut self, line: &str) -> Result<()> {
         let node = self.get_node(self.pos);
-        let words = line.to_lowercase().split_whitespace().map(|x| x.to_string()).collect::<Vec<_>>();
+        let words = line
+            .to_lowercase()
+            .split_whitespace()
+            .map(|x| x.to_string())
+            .collect::<Vec<_>>();
         match line {
             "show" => {
                 node.show();
+            }
+            "help" => {
+                println!("{}", "Following commands are available for nodes:".green());
+                println!("# <comment>");
+                println!("<label>:");
+                println!("add <port>");
+                println!("sub <port>");
+                println!("nop");
+                println!("sav");
+                println!("neg");
+                println!("neg");
+                println!("jmp <label>");
+                println!("jez <label>");
+                println!("jnz <label>");
+                println!("jgz <label>");
+                println!("jlz <label>");
+                println!("jro <port>");
+                println!("");
+                println!("{}", "Other commands:".green());
+                println!("show");
+                println!("clear");
+                println!("save");
+                println!("load");
+                println!("inst");
+                println!("up");
+                println!("down");
+                println!("left");
+                println!("right");
             }
             "clear" => {
                 node.instructions = vec![];
@@ -43,14 +75,18 @@ impl Program {
                     format!("node.ron")
                 };
                 let file = fs::File::open(title)?;
-                let node: Self = de::from_reader(file)?;
-                *self = node;
+                let program: Self = de::from_reader(file)?;
+                *self = program;
             }
             "inst" => {
                 for inst in node.instructions.iter() {
                     println!("{:?}", inst.green());
                 }
             }
+            "left" => self.pos.0 -= 1,
+            "right" => self.pos.0 += 1,
+            "up" => self.pos.1 -= 1,
+            "down" => self.pos.1 += 1,
             _ => {
                 node.parse(line, words)?;
             }
@@ -67,12 +103,106 @@ struct Node {
     acc: isize,
     bak: isize,
     pc: usize,
+    label_positions: Vec<(Label, usize)>,
     instructions: Vec<Instruction>,
 }
 
 impl Node {
     fn new() -> Self {
         Self::default()
+    }
+    fn run_instruction(&mut self) {
+        macro_rules! step {
+            () => {
+                self.pc += 1;
+                if self.pc > self.instructions.len() {
+                    self.pc = 0;
+                }
+            };
+        }
+        macro_rules! jump_label {
+            ($i:ident) => {
+                let position = self.label_positions.iter().position(|x| x.0 == *$i);
+                if let Some(position) = position {
+                    self.pc = position;
+                } else {
+                    step!();
+                }
+            };
+        }
+        let instruction = self.instructions.get(self.pc);
+        if let Some(instruction) = instruction {
+            match &*instruction {
+                Swp => {
+                    let temp = self.bak;
+                    self.bak = self.acc;
+                    self.acc = temp;
+                    step!();
+                }
+                Sav => {
+                    self.bak = self.acc;
+                    step!();
+                }
+                Neg => {
+                    if self.acc < 0 {
+                        self.acc -= 1;
+                    }
+                    step!();
+                }
+                CreateLabel(label) => {
+                    if self.label_positions.iter().all(|x| x.0 != *label) {
+                        self.label_positions.push(((*label).clone(), self.pc));
+                    }
+                    step!();
+                }
+                Jmp(label) => {
+                    jump_label!(label);
+                }
+                Jez(label) => {
+                    if self.acc == 0 {
+                        jump_label!(label);
+                    } else {
+                        step!();
+                    }
+                }
+                Jnz(label) => {
+                    if self.acc != 0 {
+                        jump_label!(label);
+                    } else {
+                        step!();
+                    }
+                }
+                Jgz(label) => {
+                    if self.acc > 0 {
+                        jump_label!(label);
+                    } else {
+                        step!();
+                    }
+                }
+                Jlz(label) => {
+                    if self.acc <= 0 {
+                        jump_label!(label);
+                    } else {
+                        step!();
+                    }
+                }
+                Jro(port) => {
+                    todo!();
+                }
+                Add(port) => {
+                    todo!();
+                }
+                Sub(port) => {
+                    todo!();
+                }
+                Mov(from_port, to_port) => {
+                    todo!();
+                }
+                _ => {
+                    step!();
+                }
+            }
+        }
     }
     fn parse(&mut self, line: &str, words: Vec<String>) -> Result<()> {
         macro_rules! push {
@@ -139,6 +269,12 @@ impl Node {
                 let port = Port::parse(&words[1])?;
                 push!(Sub(port));
             }
+            "pop" => {
+                let inst = self.instructions.pop();
+                if let Some(inst) = inst {
+                    println!("{:?}", inst.green())
+                }
+            }
             _ => return Err(anyhow!("Failed to read `{}`", line.red())),
         };
         Ok(())
@@ -150,7 +286,7 @@ impl Node {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
 struct Label(String);
 
 #[allow(dead_code)]
