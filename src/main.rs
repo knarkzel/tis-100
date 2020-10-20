@@ -5,6 +5,21 @@ use crate::{Instruction::*, Port::*};
 use serde::{Serialize, Deserialize};
 use ron::{ser, de};
 use std::fs;
+use std::collections::HashMap;
+
+#[derive(Debug, Default)]
+struct Program {
+    nodes: HashMap<Pos, Node>,
+}
+
+impl Program {
+    fn add_node(&mut self, pos: Pos) {
+        self.nodes.entry(pos).or_insert(Node::new());
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Hash)]
+struct Pos(isize, isize);
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct Node {
@@ -18,25 +33,28 @@ impl Node {
     fn new() -> Self {
         Self::default()
     }
-    fn parse(&mut self, line: &str, i: &mut usize) -> Result<()> {
+    fn parse(&mut self, line: &str) -> Result<()> {
         macro_rules! push {
             ($e:expr) => {
                 let instructions = &mut self.instructions;
                 instructions.push($e);
-                *i += 1;
+                return Ok(());
             };
         }
+
         let words = line.to_lowercase().split_whitespace().map(|x| x.to_string()).collect::<Vec<_>>();
+
+        macro_rules! jump {
+            ($i:ident) => {
+                let label = Label(words[1].clone());
+                push!($i(label));
+            };
+        }
         if line.starts_with("#") {
             push!(Comment(line[1..].to_string()));
-            return Ok(());
         } else if line.contains(':') {
-            let label = Label {
-                name: line.trim_end_matches(':').to_string(),
-                line: *i,
-            };
-            push!(Label(label));
-            return Ok(());
+            let label = Label(line.trim_end_matches(':').to_string());
+            push!(CreateLabel(label));
         }
         match &*words[0] {
             "show" => {
@@ -64,6 +82,11 @@ impl Node {
                 let node: Self = de::from_reader(file)?;
                 *self = node;
             }
+            "inst" => {
+                for inst in self.instructions.iter() {
+                    println!("{:?}", inst.green());
+                }
+            }
             "nop" => (),
             "mov" => {
                 let first = Port::parse(words[1].trim_end_matches(','))?;
@@ -71,12 +94,40 @@ impl Node {
                 push!(Mov(first, second));
             }
             "swp" => {
-                let temp = self.acc;
-                self.acc = self.bak;
-                self.bak = temp;
+                push!(Swp);
             }
             "sav" => {
-                self.bak = self.acc;    
+                push!(Sav);
+            }
+            "neg" => {
+                push!(Neg);
+            }
+            "jmp" => {
+                jump!(Jmp);
+            }
+            "jez" => {
+                jump!(Jez);
+            }
+            "jnz" => {
+                jump!(Jnz);
+            }
+            "jgz" => {
+                jump!(Jgz);
+            }
+            "jlz" => {
+                jump!(Jlz);
+            }
+            "jro" => {
+                let port = Port::parse(&words[1])?;
+                push!(Jro(port));
+            }
+            "add" => {
+                let port = Port::parse(&words[1])?;
+                push!(Add(port));
+            }
+            "sub" => {
+                let port = Port::parse(&words[1])?;
+                push!(Sub(port));
             }
             _ => return Err(anyhow!("Failed to read `{}`", line.red())),
         };
@@ -89,11 +140,8 @@ impl Node {
     }
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
-struct Label {
-    name: String,
-    line: usize,
-}
+#[derive(Debug, Serialize, Deserialize)]
+struct Label(String);
 
 #[allow(dead_code)]
 #[derive(Debug, Serialize, Deserialize)]
@@ -105,6 +153,7 @@ enum Port {
     Down,
     Any,
     Last,
+    Nil,
     Value(isize),
 }
 
@@ -112,6 +161,7 @@ impl Port {
     fn parse(token: &str) -> Result<Self> {
         let port = match token {
             "acc" => Acc,
+            "nil" => Nil,
             "left" => Left,
             "right" => Right,
             "up" => Up,
@@ -138,7 +188,7 @@ enum Instruction {
     Sav,
     Neg,
     Comment(String),
-    Label(Label),
+    CreateLabel(Label),
     Jmp(Label),
     Jez(Label),
     Jnz(Label),
@@ -153,7 +203,6 @@ enum Instruction {
 fn main() {
     let mut node = Node::new();
     let mut rl = Editor::<()>::new();
-    let mut i = 0;
     loop {
         let readline = rl.readline("> ");
         match readline {
@@ -162,7 +211,7 @@ fn main() {
                 if line.is_empty() {
                     continue;
                 }
-                let parse = node.parse(line, &mut i);
+                let parse = node.parse(line);
                 if let Err(parse) = parse {
                     println!("{}", parse);
                 }
