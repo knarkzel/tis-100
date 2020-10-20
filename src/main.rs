@@ -7,61 +7,25 @@ use ron::{ser, de};
 use std::fs;
 use std::collections::HashMap;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 struct Program {
+    pos: Pos,
     nodes: HashMap<Pos, Node>,
 }
 
 impl Program {
-    fn add_node(&mut self, pos: Pos) {
-        self.nodes.entry(pos).or_insert(Node::new());
+    fn get_node(&mut self, pos: Pos) -> &mut Node {
+        self.nodes.entry(pos).or_insert(Node::new())
     }
-}
-
-#[derive(Debug, Eq, PartialEq, Hash)]
-struct Pos(isize, isize);
-
-#[derive(Debug, Default, Serialize, Deserialize)]
-struct Node {
-    acc: isize,
-    bak: isize,
-    pc: usize,
-    instructions: Vec<Instruction>,
-}
-
-impl Node {
-    fn new() -> Self {
-        Self::default()
-    }
-    fn parse(&mut self, line: &str) -> Result<()> {
-        macro_rules! push {
-            ($e:expr) => {
-                let instructions = &mut self.instructions;
-                instructions.push($e);
-                return Ok(());
-            };
-        }
-
+    fn check_commands(&mut self, line: &str) -> Result<()> {
+        let node = self.get_node(self.pos);
         let words = line.to_lowercase().split_whitespace().map(|x| x.to_string()).collect::<Vec<_>>();
-
-        macro_rules! jump {
-            ($i:ident) => {
-                let label = Label(words[1].clone());
-                push!($i(label));
-            };
-        }
-        if line.starts_with("#") {
-            push!(Comment(line[1..].to_string()));
-        } else if line.contains(':') {
-            let label = Label(line.trim_end_matches(':').to_string());
-            push!(CreateLabel(label));
-        }
-        match &*words[0] {
+        match line {
             "show" => {
-                self.show();
+                node.show();
             }
             "clear" => {
-                self.instructions = vec![];
+                node.instructions = vec![];
             }
             "save" => {
                 let title = if words.len() > 1 {
@@ -83,10 +47,56 @@ impl Node {
                 *self = node;
             }
             "inst" => {
-                for inst in self.instructions.iter() {
+                for inst in node.instructions.iter() {
                     println!("{:?}", inst.green());
                 }
             }
+            _ => {
+                node.parse(line, words)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Default, Eq, PartialEq, Hash, Serialize, Deserialize, Copy, Clone)]
+struct Pos(isize, isize);
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct Node {
+    acc: isize,
+    bak: isize,
+    pc: usize,
+    instructions: Vec<Instruction>,
+}
+
+impl Node {
+    fn new() -> Self {
+        Self::default()
+    }
+    fn parse(&mut self, line: &str, words: Vec<String>) -> Result<()> {
+        macro_rules! push {
+            ($e:expr) => {
+                let instructions = &mut self.instructions;
+                instructions.push($e);
+                return Ok(());
+            };
+        }
+        macro_rules! jump {
+            ($i:ident) => {
+                let label = Label(words[1].clone());
+                push!($i(label));
+            };
+        }
+
+        if line.starts_with("#") {
+            push!(Comment(line[1..].to_string()));
+        } else if line.contains(':') {
+            let label = Label(line.trim_end_matches(':').to_string());
+            push!(CreateLabel(label));
+        }
+
+        match &*words[0] {
             "nop" => (),
             "mov" => {
                 let first = Port::parse(words[1].trim_end_matches(','))?;
@@ -201,7 +211,7 @@ enum Instruction {
 }
 
 fn main() {
-    let mut node = Node::new();
+    let mut program = Program::default();
     let mut rl = Editor::<()>::new();
     loop {
         let readline = rl.readline("> ");
@@ -211,9 +221,9 @@ fn main() {
                 if line.is_empty() {
                     continue;
                 }
-                let parse = node.parse(line);
-                if let Err(parse) = parse {
-                    println!("{}", parse);
+                let error = program.check_commands(line);
+                if let Err(error) = error {
+                    println!("{}", error);
                 }
             }
             Err(_) => break,
