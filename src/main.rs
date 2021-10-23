@@ -186,16 +186,16 @@ impl Node {
                         step!();
                     }
                 }
-                Jro(port) => {
+                Jro(_port) => {
                     todo!();
                 }
-                Add(port) => {
+                Add(_port) => {
                     todo!();
                 }
-                Sub(port) => {
+                Sub(_port) => {
                     todo!();
                 }
-                Mov(from_port, to_port) => {
+                Mov(_from_port, _to_port) => {
                     todo!();
                 }
                 _ => {
